@@ -1,0 +1,7 @@
+05/16/2024
+I pulled together inventory receiving and greenlight data to add to the HSC timelines whenever you get a chance. No rush.
+Query for inventory receiving is here: 
+https://github.com/bayer-int/breeding-tpd-cspAnalyticsSandbox/blob/main/projects/regulated_packaging_capacity/sql/HSC_receiving.sql
+
+Set greenlighting is tracked on their sharepoint site, so I downloaded and extracted what I think is the useful information (csv attached). 
+Script is here if you are interested: https://github.com/bayer-int/breeding-tpd-cspAnalyticsSandbox/blob/main/projects/regulated_packaging_capacity/scripts/greenlight_timelines.py
