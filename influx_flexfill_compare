@@ -1,0 +1,89 @@
+WITH declares AS (
+  SELECT
+    DATE '2024-01-01' AS start_date,
+    2024 AS target_planting_year,
+    '10002' AS station,
+    ARRAY<STRING> ['Corn', 'Cotton', 'Wheat', 'Soybean', 'Soybeans', 'Sweet Corn'] AS crops,
+    ARRAY<STRING> ['10002-081', '10002-001', '10002-005', '10002-028', '10002-019', '10002-020', '10002-071', '10002-084',
+                  '10002-029', '10002-058', '10002-062', '10002-030', '10002-059', '10002-057', '10002-063',
+                  '10002-061', '10002-056', '10002-065', '10002-082', '10002-002', '10002-023', '10002-022', '10002-024',
+                  '10002-064', '10002-027', '10002-055', '10002-026', '10002-088', '10002-025', '10002-090'] AS machines
+),
+
+velocity_cells_wdate AS (
+  SELECT filled_on,
+  --DATE(filled_on, 'America/Chicago') AS date,
+        --EXTRACT(DATE FROM filled_on) AS date,
+         hopper AS machine_id,
+        
+         CAST(packet_bid AS STRING) AS packet_bid
+  FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
+ 
+  WHERE DATE(filled_on, 'America/Chicago') >= (SELECT start_date FROM declares)
+  AND flex.station = (SELECT station FROM declares)
+  AND flex.hopper IN (
+    SELECT LTRIM(REGEXP_EXTRACT(machines, r'^[a-zA-Z0-9_.+-]+\-([a-zA-Z0-9-.]+$)'), '0')
+    FROM declares, UNNEST(machines) AS machines
+  )
+  AND DATE(filled_on, 'America/Chicago') <= '2024-05-09'
+  AND DATE(filled_on, 'America/Chicago') >= '2024-05-06'
+),
+
+  fts_cells_wdate AS (
+  SELECT iotmetadata_gatewaytimestamp,
+  --DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') AS date,
+    --EXTRACT(DATE FROM iotmetadata_gatewaytimestamp) AS date,
+  LTRIM(SUBSTR(serial_number, -3), '0') AS machine_id,
+   
+    plot_b_id AS packet_bid
+  FROM `bcs-breeding-datasets.breeding_operations.flex_filler_fill` AS flex
+ 
+  WHERE DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') >= (SELECT start_date FROM declares)
+  AND serial_number IN (SELECT machines FROM declares, UNNEST(machines) AS machines)
+  --AND STARTS_WITH(plot_b_id, 'P0')
+    AND DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') <= '2024-05-09'
+  AND DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') >= '2024-05-06'
+  ),
+  velocity_cells_wodate AS (
+  SELECT 
+  --filled_on,
+  --DATE(filled_on, 'America/Chicago') AS date,
+        --EXTRACT(DATE FROM filled_on) AS date,
+         hopper AS machine_id,
+        
+         CAST(packet_bid AS STRING) AS packet_bid
+  FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
+ 
+  WHERE DATE(filled_on, 'America/Chicago') >= (SELECT start_date FROM declares)
+  AND flex.station = (SELECT station FROM declares)
+  AND flex.hopper IN (
+    SELECT LTRIM(REGEXP_EXTRACT(machines, r'^[a-zA-Z0-9_.+-]+\-([a-zA-Z0-9-.]+$)'), '0')
+    FROM declares, UNNEST(machines) AS machines
+  )
+  AND DATE(filled_on, 'America/Chicago') <= '2024-05-09'
+  AND DATE(filled_on, 'America/Chicago') >= '2024-05-06'
+),
+
+  fts_cells_wodate AS (
+  SELECT 
+  --iotmetadata_gatewaytimestamp,
+  --DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') AS date,
+    --EXTRACT(DATE FROM iotmetadata_gatewaytimestamp) AS date,
+  LTRIM(SUBSTR(serial_number, -3), '0') AS machine_id,
+   
+    plot_b_id AS packet_bid
+  FROM `bcs-breeding-datasets.breeding_operations.flex_filler_fill` AS flex
+ 
+  WHERE DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') >= (SELECT start_date FROM declares)
+  AND serial_number IN (SELECT machines FROM declares, UNNEST(machines) AS machines)
+  --AND STARTS_WITH(plot_b_id, 'P0')
+    AND DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') <= '2024-05-09'
+  AND DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') >= '2024-05-06'
+  )
+
+  SELECT *
+  FROM velocity_cells_wdate
+  INNER JOIN fts_cells_wdate
+  ON velocity_cells_wdate.machine_id = fts_cells_wdate.machine_id
+  AND velocity_cells_wdate.packet_bid = fts_cells_wdate.packet_bid
+  
