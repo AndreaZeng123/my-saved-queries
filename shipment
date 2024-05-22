@@ -1,0 +1,8 @@
+#05/09/2024
+#re: HSC timelines work -
+#here is a query you can use to get shipping data from HSC. You will have to join by set id
+
+SELECT DISTINCT set_id, DATE(shipDate) AS ship_date
+FROM `bcs-csw-core.velocity.shipment_summary`,
+UNNEST(setIdsInShipment) AS set_id
+WHERE DATE(shipDate) >= '2024-03-13' --min in cassette dashboard is 3/14
