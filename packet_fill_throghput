@@ -1,0 +1,17 @@
+#05/22/2024
+#query for packet counting (YTP, NSP)
+SELECT DATE(datetime_child_scan, 'America/Chicago') AS date, 
+	machine_serial, batch_packet_barcode,
+FROM `bcs-breeding-datasets.breeding_operations.mactracker_ytp` 
+WHERE machine_location = 'HAZ'
+AND NOT STARTS_WITH(batch_packet_barcode, 'VALIDATION')
+AND DATE(datetime_child_scan, 'America/Chicago') >= '2024-02-19'
+ 
+UNION ALL
+ 
+SELECT DATE(datetime_child_scan, 'America/Chicago') AS date, 
+	machine_serial, batch_packet_barcode,
+FROM `bcs-breeding-datasets.breeding_operations.mactracker_nsp` 
+WHERE machine_location = 'HAZ'
+AND NOT STARTS_WITH(batch_packet_barcode, 'VALIDATION')
+AND DATE(datetime_child_scan, 'America/Chicago') >= '2024-02-19'
