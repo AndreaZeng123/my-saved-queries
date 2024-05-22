@@ -1,0 +1,65 @@
+-- set constants
+WITH declares AS (
+  SELECT
+    DATE '2024-01-01' AS start_date,
+    2024 AS target_planting_year,
+    '10002' AS station,
+    ARRAY<STRING> ['Corn', 'Cotton', 'Wheat', 'Soybean', 'Soybeans', 'Sweet Corn'] AS crops,
+    ARRAY<STRING> ['10002-081', '10002-001', '10002-005', '10002-028', '10002-019', '10002-020', '10002-071', '10002-084',
+                  '10002-029', '10002-058', '10002-062', '10002-030', '10002-059', '10002-057', '10002-063',
+                  '10002-061', '10002-056', '10002-065', '10002-082', '10002-002', '10002-023', '10002-022', '10002-024',
+                  '10002-064', '10002-027', '10002-055', '10002-026', '10002-088', '10002-025', '10002-090'] AS machines
+),
+ 
+-- velocity cells
+velocity_cells AS (
+  SELECT DATE(filled_on, 'America/Chicago') AS date,
+        --EXTRACT(DATE FROM filled_on) AS date,
+         hopper AS machine_id,
+         CASE
+          WHEN crop IS NULL THEN 'Velocity Crop Unknown'
+          ELSE crop END AS crop,
+         CAST(packet_bid AS STRING) AS packet_bid,
+  FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
+  LEFT JOIN (
+    SELECT id, crop, material_fulfillment_group
+    FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_planting_session`
+    WHERE planting_year = (SELECT target_planting_year FROM declares)
+  ) AS ps ON flex.planting_session_id = ps.id
+ 
+  WHERE DATE(filled_on, 'America/Chicago') >= (SELECT start_date FROM declares)
+  AND flex.station = (SELECT station FROM declares)
+  AND flex.hopper IN (
+    SELECT LTRIM(REGEXP_EXTRACT(machines, r'^[a-zA-Z0-9_.+-]+\-([a-zA-Z0-9-.]+$)'), '0')
+    FROM declares, UNNEST(machines) AS machines
+  )
+),
+ 
+-- fts cells
+fts_cells AS (
+  SELECT DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') AS date,
+    --EXTRACT(DATE FROM iotmetadata_gatewaytimestamp) AS date,
+  LTRIM(SUBSTR(serial_number, -3), '0') AS machine_id,
+    CASE
+      WHEN crop IS NULL THEN 'FTS Crop Unknown'
+      ELSE crop END AS crop,
+    plot_b_id AS packet_bid
+  FROM `bcs-breeding-datasets.breeding_operations.flex_filler_fill` AS flex
+ 
+  LEFT JOIN (
+    SELECT DISTINCT crop, field_name
+    FROM `bcs-breeding-datasets.breeding_pipeline.ops_experiment_entries`
+    WHERE crop IN (SELECT crops FROM declares, UNNEST(crops) AS crops)
+    AND planting_year = (SELECT target_planting_year FROM declares)
+  ) AS ops_experiment_entries
+  ON flex.field_id = ops_experiment_entries.field_name
+ 
+  WHERE DATE(iotmetadata_gatewaytimestamp, 'America/Chicago') >= (SELECT start_date FROM declares)
+  AND serial_number IN (SELECT machines FROM declares, UNNEST(machines) AS machines)
+  AND STARTS_WITH(plot_b_id, 'P0')
+)
+ 
+-- merge them together
+SELECT * FROM velocity_cells
+UNION ALL
+SELECT * FROM fts_cells
