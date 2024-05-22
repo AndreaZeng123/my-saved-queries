@@ -1,0 +1,6 @@
+#04/23/2024
+So this is what I am trying to do:
+All the dates you are looking for are in the yield trial section of PCC on the event dates tab. 
+https://spotfire-app.monsanto.com/spotfire/wp/analysis?file=/Breeding/MSP/SeedOpsDataViz/Prod/PCC_POC&waid=PXfb7RavRkCTtdDKxtsuN-17161556f4FM-F&wavid=0
+ 
+I am trying to find out if someone will give us credentials to just pull from the S3 bucket instead of exporting from spotfire because it is a huge table.
