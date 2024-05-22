@@ -1,0 +1,9 @@
+#05/13/2024
+
+--The processing data I mentioned is in the mactracker_shellmatic tables, but I don't know anything about them. I am going to ask someone and include you on the messages (so this was just to give you a warning
+)
+
+SELECT *
+FROM `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3`
+WHERE EXTRACT(YEAR FROM datetime_start) = 2024
+LIMIT 10
