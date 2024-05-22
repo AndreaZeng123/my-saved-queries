@@ -1,0 +1,23 @@
+#04/23/2024
+SELECT set_id, MAX(jars.jar_received) AS last_received --datetime_filler_filled, plot_bid, jar_id, catalog_id,  
+FROM public.tubes_wip_log tubes
+INNER JOIN (
+	SELECT jar_id, MAX(datetime_received) AS jar_received
+	FROM ( -- Sarah C. said need to concat both jar tables
+			SELECT jar_id, datetime_received
+			FROM public.jar_inventory_log
+ 
+			UNION ALL
+ 
+			SELECT jar_id, datetime_received
+			FROM public.jar_inventory
+		) concat_jars
+	GROUP BY jar_id	
+) jars USING(jar_id)
+ 
+WHERE tube_status = 9 --tube dumped into filler
+AND record_reported = 'T'
+AND is_test IS False
+AND cassette_id NOT LIKE 'WSCCRY%' -- not sure if this filter is also needed for Urbandale
+AND DATE(datetime_filler_filled) >= '2024-02-25' --first day of Whitestown production
+GROUP BY set_id
