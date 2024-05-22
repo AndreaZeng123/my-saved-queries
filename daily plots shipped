@@ -1,0 +1,29 @@
+WITH process AS (SELECT
+  record_id,
+  src_plot_bid,
+  inv_bid,
+  src_set,
+  EXTRACT(Date from datetime_start) as date_start,
+  EXTRACT(Date from datetime_finish) as date_finish,
+  machine_location,
+  machine_serial,
+  batch_tracking_number,
+  time_processing,
+  crop,
+  originator_function,
+  jar_id
+FROM
+  `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3`
+WHERE
+  EXTRACT(YEAR
+  FROM
+    datetime_start) = 2024
+  AND machine_location = "HAZ"
+  AND src_plot_bid <> "CALIBRATION"
+ORDER BY
+  datetime_start)
+
+  SELECT date_start, COUNT(DISTINCT src_plot_bid) AS count_src_plot
+  FROM process
+  GROUP BY date_start
+  order by date_start
