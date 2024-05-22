@@ -1,0 +1,5 @@
+#05/08/2024
+Check out these queries to get packet and flex fill time lines at HSC. 
+Be aware this gets data for all sites, so you'll want to modify it to be HSC only. 
+I'm happy to answer questions once you've had a chance to take a look.
+https://github.com/bayer-int/breeding-tpd-seedCenterSQL/tree/main/throughput_dashboard
