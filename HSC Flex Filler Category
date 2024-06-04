@@ -1,4 +1,2 @@
-These are the flex filler serial numbers that where CAT 3 (all others would be CAT 2)
- 
-CAT3
-62.63,55,88,29,22,81,90,25,19,71,65,84,20
+ARRAY<STRING> ['19','20','22','25','29','55','62','63','65','71','81','84','88','90'] AS CAT3_machines,
+ARRAY<STRING> ['1','2','5','23','24','26','27','28','30','56','57','58','59','61','64','82'] AS CAT3_machines,
