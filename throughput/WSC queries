@@ -1,0 +1,49 @@
+WITH step_one AS ( 
+
+SELECT jar_id, counter_group_id, cassette_cell, test_set_id, twl.field_id, set_id, entry_id, f2f.planting_session_code 
+
+FROM public.tubes_wip_log twl 
+
+INNER JOIN ( 
+
+SELECT DISTINCT field_id, planting_session_code 
+
+FROM public.fields_to_fill 
+
+WHERE comment = '' 
+
+AND SUBSTRING(season, 1, 4) = '2024' 
+
+AND EXTRACT(MONTH FROM datetime_filled) = 3 -- Remove this after testing! 
+
+AND filled IS True 
+
+) f2f ON twl.field_id = f2f.field_id 
+
+AND tube_status = 9 --tube dumped into filler 
+
+AND record_reported = 'T' 
+
+AND is_test IS False 
+
+AND tube_id NOT IN ( 
+
+SELECT tube_id 
+
+FROM qc_filler_carryover_tubes  
+
+) 
+
+) 
+
+ 
+
+SELECT jar_id, counter_group_id, test_set_id, field_id, set_id, planting_session_code, COUNT(*) AS n_cells 
+
+FROM step_one 
+
+GROUP BY jar_id, counter_group_id, test_set_id, field_id, planting_session_code, set_id 
+
+ORDER BY jar_id, counter_group_id 
+
+ 
