@@ -1,0 +1,9 @@
+SELECT date(datetime_filler_filled) as filled_date,  count(cassette_cell) as cnt_cell
+FROM public.tubes_wip_log
+WHERE tube_status = 9 --tube dumped into filler
+AND record_reported = 'T'
+AND is_test IS False
+AND cassette_id NOT LIKE 'WSCCRY%' -- not sure if this filter is also needed for Urbandale
+AND DATE(datetime_filler_filled) >= '2024-02-25' --first day of Whitestown production
+group by date(datetime_filler_filled)
+ORDER BY filled_date 
