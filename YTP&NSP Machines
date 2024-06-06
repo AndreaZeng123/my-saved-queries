@@ -1,0 +1,47 @@
+SELECT distinct machine_serial AS ytp_machine FROM `bcs-breeding-datasets.breeding_operations.mactracker_ytp` WHERE machine_location ='HAZ'
+AND EXTRACT(DATE FROM record_inserted)>'2024-01-01'
+ORDER BY 1;
+
+SELECT distinct machine_serial AS nsp_machine FROM `bcs-breeding-datasets.breeding_operations.mactracker_nsp` WHERE machine_location ='HAZ'
+AND EXTRACT(DATE FROM record_inserted)>'2024-01-01'
+ORDER BY 1;
+
+
+ytp_machine:
+'016',
+'017',
+'018',
+'019',
+'020',
+'022',
+'024',
+'025',
+'031',
+'032',
+'034',
+'036',
+'039',
+'040',
+'042',
+'045',
+'050',
+'058',
+'060',
+'061',
+'062',
+'063',
+'064',
+'065',
+'066',
+'067',
+'068',
+'069',
+'5'
+
+nsp_machine:
+'013',
+'014',
+'019',
+'029',
+'052',
+'115'
