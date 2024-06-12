@@ -1,0 +1,448 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[2]:
+
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+
+
+# In[3]:
+
+
+pd.set_option('display.max_rows', None)
+pd.set_option('display.max_columns', None)
+
+
+# In[4]:
+
+
+from google.cloud import bigquery
+from google.oauth2 import service_account
+from google.cloud import bigquery_storage
+import time
+import base64
+import json
+import os
+
+secrets = os.environ['csw_gcp_secret']
+service_account_creds = json.loads(base64.b64decode(secrets))
+
+ 
+
+bq_project = 'bcs-breeding-datasets'
+bq_credentials = service_account.Credentials.from_service_account_info(service_account_creds)
+
+ 
+
+bq_client = bigquery.Client(credentials=bq_credentials, project=bq_project)
+bq_storageclient = bigquery_storage.BigQueryReadClient(credentials=bq_credentials)
+
+
+# In[5]:
+
+
+configuration = {
+   'query': {
+     "useQueryCache": False
+   }
+}
+
+# Perform a query.
+QUERY1 = f"""
+SELECT
+  machine_location,
+  machine_serial,
+  src_plot_bid,
+  min(EXTRACT(Datetime from datetime_start)) as datetime_start,
+  max(EXTRACT(Datetime from datetime_finish)) as datetime_finish
+      
+FROM
+  `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3`
+WHERE
+  EXTRACT(YEAR
+  FROM
+    datetime_start) = 2024
+  AND machine_location in ("HAZ",'WIB')
+  AND src_plot_bid <> "CALIBRATION"
+  and datetime_finish is not null
+GROUP BY 1,2,3
+
+"""
+
+# Dataframe of GCP data
+df_raw = (
+    bq_client.query(QUERY1)
+    .result()
+    .to_dataframe(bqstorage_client=bq_storageclient)
+)
+
+
+# In[6]:
+
+
+df_raw.head()
+
+
+# In[7]:
+
+
+# set threshold of what should be considered downtime
+# here chose 5 minutes
+downtime_threshold_seconds = 5 * 60
+
+
+# #### Processing time for each source plot
+
+# In[6]:
+
+
+# update data types
+df_raw['date'] = df_raw.datetime_finish.dt.date
+df_raw['machine_serial'] = df_raw.machine_serial.astype(int)
+# TODO: fix this
+df_raw['category'] = 'none'
+# df_raw['category'] = np.where(df_raw.machine_id.isin(cat_3), 'cat 3', 'cat 2')
+df_raw['processing_time_srcplot'] = df_raw['datetime_finish'] - df_raw['datetime_start']
+df_raw['processing_in_seconds'] = df_raw['processing_time_srcplot'].dt.total_seconds()
+
+
+# In[7]:
+
+
+df_raw.head()
+
+
+# In[8]:
+
+
+medians = df_raw.groupby('machine_location')['processing_in_seconds'].median().round()
+# fig, ax = plt.subplots()
+plt.figure(figsize=(12,6))
+box_plot_p = sns.boxplot(data=df_raw, x='machine_location', y='processing_in_seconds', showfliers=False) 
+box_plot_p.set_title('Processing Time')
+vertical_offset = df_raw['processing_in_seconds'].median() *0.05
+
+# for xtick in box_plot.get_xticks():
+#     box_plot.text(xtick, medians.iloc[xtick] + vertical_offset, medians.iloc[xtick], 
+#             horizontalalignment='center', color='w')
+
+for xtick, loc in enumerate(df_raw['machine_location'].unique()):
+    median_val = medians.loc[loc]
+    box_plot_p.text(xtick, median_val+vertical_offset, median_val, horizontalalignment='center',color='w')
+
+
+# In[9]:
+
+
+stats_p = df_raw.groupby('machine_location')['processing_in_seconds'].describe().round()
+stats_p
+
+
+# In[8]:
+
+
+df_raw.groupby('machine_location')['src_plot_bid'].describe().round()
+
+
+# #### Take home
+# The median processing time is 86-108 seconds and anything above 300 seconds may be considered an outlier.
+
+# #### Downtime between plots
+
+# In[10]:
+
+
+df_raw = df_raw.sort_values(by=['machine_location','machine_serial','date','datetime_start'])
+grouped = df_raw.groupby(['machine_location','machine_serial','date'])
+
+def cal_downtime(group):
+    group['next_datetime_start'] = group['datetime_start'].shift(-1)
+    group['diff'] = group['next_datetime_start'] - group['datetime_finish']
+    return group
+
+df_downtime = grouped.apply(cal_downtime)
+#df_downtime = df_downtime.drop(columns=['next_datetime_start'])
+
+
+# In[11]:
+
+
+df_downtime['diff_in_seconds'] = df_downtime['diff'].dt.total_seconds()
+
+
+# In[79]:
+
+
+df_downtime.tail()
+
+
+# In[13]:
+
+
+# make the ones with negative diff 0 downtime because that's an overlap therefore no downtime between the two
+df_downtime['downtime_in_seconds'] = np.where(df_downtime['diff_in_seconds']>0,df_downtime['diff_in_seconds'],0)
+
+
+# In[80]:
+
+
+df_downtime.tail()
+
+
+# In[15]:
+
+
+medians_d = df_downtime.groupby('machine_location')['downtime_in_seconds'].median().round()
+# fig, ax = plt.subplots()
+
+box_plot_d = sns.boxplot(data=df_downtime, x='machine_location', y='downtime_in_seconds', showfliers=False) 
+box_plot_d.set_title('Downime')
+vertical_offset_d = df_downtime['downtime_in_seconds'].median() *0.06
+
+# for xtick in box_plot.get_xticks():
+#     box_plot.text(xtick, medians.iloc[xtick] + vertical_offset, medians.iloc[xtick], 
+#             horizontalalignment='center', color='w')
+
+for xtick, loc in enumerate(df_downtime['machine_location'].unique()):
+    median_val = medians_d.loc[loc]
+    box_plot_d.text(xtick, median_val+vertical_offset_d, median_val, horizontalalignment='center',color='w')
+
+
+# In[16]:
+
+
+stats_d = df_downtime.groupby('machine_location')['downtime_in_seconds'].describe().round()
+stats_d
+
+
+# #### Understand machine run time
+
+# In[17]:
+
+
+# run time is any time excluding gaps of more than 5 min
+# what percent of records are downtime (gap > 5 min)?
+np.round(df_downtime[df_downtime['downtime_in_seconds'] >= downtime_threshold_seconds].shape[0] / df_downtime.shape[0] * 100)
+
+
+# In[18]:
+
+
+# calculate run time: if downtime is smaller than threshold, then run time = process time + down time; otherwise, run time = process time
+
+df_downtime['run_time'] = np.where(df_downtime['downtime_in_seconds'] <= downtime_threshold_seconds,
+                                df_downtime['downtime_in_seconds']+df_downtime['processing_in_seconds'], \
+                                   df_downtime['processing_in_seconds'])
+
+
+# In[66]:
+
+
+df_downtime.head()
+
+
+# In[60]:
+
+
+# get hours per day per machine
+machine_run_time = df_downtime.groupby(
+    ['machine_location','machine_serial','date','category']).run_time.sum().reset_index(name='runtime_seconds')
+machine_run_time['runtime_hours'] = round(
+    machine_run_time.runtime_seconds/60/60, 2)
+
+
+# In[43]:
+
+
+#machine_run_time[machine_run_time['runtime_hours']>18]
+
+
+# In[61]:
+
+
+# There are some plots that are processed across 2 dates, making the run time so long. Use a threshold to remove these 
+Runtime_threshold = 18
+np.round(machine_run_time[machine_run_time['runtime_hours'] >= Runtime_threshold].shape[0] / machine_run_time.shape[0] * 100)
+
+
+# In[62]:
+
+
+machine_run_time = machine_run_time[machine_run_time['runtime_hours']<Runtime_threshold]
+
+
+# In[64]:
+
+
+sns.boxplot(data=machine_run_time, x='machine_location',y='runtime_hours')
+
+
+# In[84]:
+
+
+#[(machine_run_time.runtime_hours > 1)]
+stats_m = machine_run_time.groupby('machine_location')['runtime_hours'].describe().round()
+stats_m
+
+
+# In[46]:
+
+
+
+# get plots processed per day per machine
+machine_plots_processed = df_downtime.groupby(
+    ['machine_location','machine_serial','date','category']).size().reset_index(name='n_plots_processed')
+
+daily_df = pd.merge(machine_run_time, machine_plots_processed)
+
+daily_df['plots_per_hour'] = daily_df['n_plots_processed'] /     daily_df['runtime_hours']
+
+daily_df['date'] = pd.to_datetime(daily_df['date'])
+daily_df.sort_values('date', inplace=True)
+
+# additional date labels for plotting
+daily_df['month_day'] = daily_df['date'].dt.strftime('%m-%d')
+daily_df['week'] = daily_df['date'].dt.isocalendar().week
+
+
+# In[47]:
+
+
+daily_df.head()
+
+
+# In[82]:
+
+
+stats_ph = daily_df.groupby('machine_location')['plots_per_hour'].describe()
+stats_ph
+
+
+# #### Number of machines running
+
+# In[71]:
+
+
+# number of machines running per day
+n_machines = daily_df.groupby(['machine_location','date', 'category']).machine_serial.nunique()
+n_machines = n_machines.reset_index(name='n_machines')
+n_machines.sort_values('date', inplace=True)
+
+
+# In[72]:
+
+
+stats_nm = n_machines.groupby('machine_location')['n_machines'].describe()
+stats_nm
+
+
+# In[49]:
+
+
+plt.figure(figsize=(12,6))
+ax = sns.barplot(data=n_machines, x='date', y='n_machines', hue='machine_location')
+ax.tick_params(axis='x', rotation=45)
+ax.xaxis.set_major_locator(ticker.LinearLocator(10))
+_=ax.set_title('Number of Processing Machines running each day')
+
+
+# #### Plots processed per machine per hour
+# 
+# Filtered out observations of more than **100** plots per hour as outliers because 100 would be processing a plot every 36 seconds. 
+# 
+# Some outliers were created by manual uploads that assigned data to the time of the upload, not the time the work was completed.
+
+# In[50]:
+
+
+# define subplot grid
+fig, axs = plt.subplots(nrows=2, ncols=1, sharex=False, sharey=True)
+plt.figure(figsize=(12,15))
+plt.subplots_adjust(hspace=0.5)
+fig.suptitle("Plots processed per hour per machine - Outliers dropped\nline represents median")
+machine_location = daily_df.machine_location.unique()
+axes = axs.flatten()
+# # loop through sites and axes
+for s, ax in zip(machine_location, axes):
+    g = sns.barplot(data=daily_df[(daily_df.plots_per_hour <= 100) & (daily_df.machine_location == s)],
+                x='month_day', y='plots_per_hour', ax=ax)
+    g.axhline(y=daily_df[(daily_df.plots_per_hour <= 100) & (daily_df.machine_location == s)].plots_per_hour.median(),
+        c='grey', linestyle='dashed')
+    g.tick_params(axis='x', rotation=90)
+    g.xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
+    g.set(xlabel=None, title=s, ylabel='Plots per hour')
+fig.tight_layout()
+
+
+# In[51]:
+
+
+print('Plots per hour per machine summary statistics\n')
+print(daily_df[(daily_df.plots_per_hour <= 100)].groupby(['machine_location']).plots_per_hour.describe()[[
+    'count', '25%', '50%', '75%', 'max'
+]])
+print('\n By week: \n')
+print(daily_df[(daily_df.plots_per_hour <= 100)].groupby(['machine_location', 'week']).plots_per_hour.describe()[[
+    'count', '25%', '50%', '75%', 'max'
+]])
+
+
+# #### Runtime per machine per day
+
+# In[52]:
+
+
+# define subplot grid
+fig, axs = plt.subplots(nrows=2, ncols=1, sharex=False,
+                        sharey=True)  # , figsize=(15, 12)
+plt.subplots_adjust(hspace=0.5)
+fig.suptitle("Runtime per machine per day - Outliers dropped\ndotted line for reference")
+machine_location = daily_df.machine_location.unique()
+axes = axs.flatten()
+# # loop through sites and axes
+for s, ax in zip(machine_location, axes):
+    g = sns.barplot(data=daily_df[(daily_df.runtime_hours > 1) & (daily_df.machine_location == s)],
+                    x='month_day', y='runtime_hours', ax=ax)
+    g.axhline(y = 4, c='grey', linestyle='dashed')
+    g.tick_params(axis='x', rotation=90)
+    g.xaxis.set_major_locator(plt.MaxNLocator(nbins=10))
+    g.set(xlabel=None, title=s, ylabel='Runtime (hours)')
+fig.tight_layout()
+
+
+# In[77]:
+
+
+# define subplot grid
+fig, axs = plt.subplots(nrows=2, ncols=1, sharex=False,
+                        sharey=True)
+plt.subplots_adjust(hspace=0.5)
+fig.suptitle("Histogram of machine run time")
+machine_location = daily_df.machine_location.unique()
+axes = axs.flatten()
+# # loop through sites and axes
+for s, ax in zip(machine_location, axes):
+    g = sns.histplot(data=daily_df[(daily_df.runtime_hours > 1) & (daily_df.machine_location == s)],
+                    x='runtime_hours', ax=ax)
+    g.tick_params(axis='x', rotation=90)
+    g.set(ylabel=None, title=s, xlabel='Runtime (hours)')
+fig.tight_layout()
+
+
+# In[75]:
+
+
+print('Runtime hours per machine per day summary statistics\n')
+print(daily_df[(daily_df.runtime_hours > 1)].groupby(['machine_location']).runtime_hours.describe()[[
+    'count', '25%', '50%', '75%', 'max'
+]])
+print('\n By week: \n')
+print(daily_df[(daily_df.runtime_hours > 1)].groupby(['machine_location', 'week']).runtime_hours.describe()[[
+    'count', '25%', '50%', '75%', 'max'
+]])
+
