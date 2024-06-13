@@ -1,3 +1,5 @@
+# in WMS
+
 SELECT date(datetime_filler_filled) as filled_date,  count(cassette_cell) as cnt_cell
 FROM public.tubes_wip_log
 WHERE tube_status = 9 --tube dumped into filler
