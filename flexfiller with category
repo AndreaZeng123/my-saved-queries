@@ -103,25 +103,26 @@ merged AS (
   SELECT * FROM velocity_cells
   UNION ALL
   SELECT * FROM fts_cells
-),
+)
+--,
 
-counted_cells AS (
-  SELECT day, crop, merged.site,category,
+--counted_cells AS (
+  SELECT day,  merged.site,category,
   CASE WHEN (SUM(n_cells) IS NULL) THEN 0
       ELSE SUM(n_cells) END AS counted
   FROM date_range
   LEFT JOIN merged
     ON day = merged.date AND date_range.site = merged.site
-
-  GROUP BY date_range.day, crop, site,category
-  ORDER BY date_range.day, crop, site,category
-)
+  WHERE merged.site = 'HAZ'
+  GROUP BY date_range.day,  site,category
+  ORDER BY date_range.day,  site,category
+--)
 
 -- add running totals
-SELECT *, SUM(counted) OVER (
-    PARTITION BY crop, site
-    ORDER BY day
-    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-  ) AS total_counted
-FROM counted_cells
-ORDER BY day, site, crop
+--SELECT *, SUM(counted) OVER (
+--    PARTITION BY crop, site
+--    ORDER BY day
+--    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+--  ) AS total_counted
+--FROM counted_cells
+--ORDER BY day, site, crop
