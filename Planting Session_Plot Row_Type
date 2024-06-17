@@ -1,0 +1,9 @@
+SELECT planting_session_id, experiment_id,packet_bid, type, 
+CASE 
+when ((experiment_id is not null) and (packet_bid is  null)) then 'border'
+when ((experiment_id is  null) and (packet_bid is  null)) then 'buffer'
+else type
+end as type_new
+
+FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_plot_row` 
+order by type_new
