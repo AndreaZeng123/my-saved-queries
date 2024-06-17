@@ -1,4 +1,4 @@
-SELECT planting_session_id, experiment_id,packet_bid, type, 
+SELECT id as plot_row_id, planting_session_id, experiment_id,packet_bid, type, 
 CASE 
 when ((experiment_id is not null) and (packet_bid is  null)) then 'border'
 when ((experiment_id is  null) and (packet_bid is  null)) then 'buffer'
