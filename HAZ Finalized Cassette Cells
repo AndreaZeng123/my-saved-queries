@@ -1,0 +1,79 @@
+-- set constants
+WITH declares AS (
+  SELECT 
+    DATE '2024-01-01' AS start_date,
+    2024 AS target_planting_year,
+    '10002' AS station, -- station where serial number is separated into hopper and station
+    ARRAY<STRING> ['Corn', 'Cotton', 'Wheat', 'Soybean', 'Soybeans', 'Sweet Corn'] AS crops,
+    ARRAY<STRING> ['10002-004', '10002-041', '10002-048', '10002-049', '10002-053', '10002-072', '10002-075', '10002-076', '10002-079', '10002-085'] AS WIB_machines, -- WIB machine
+    ARRAY<STRING> ['10002-081', '10002-001', '10002-005', '10002-028', '10002-019', '10002-020', '10002-071', '10002-084',
+                  '10002-029', '10002-058', '10002-062', '10002-030', '10002-059', '10002-057', '10002-063',
+                  '10002-061', '10002-056', '10002-065', '10002-082', '10002-002', '10002-023', '10002-022', '10002-024',
+                  '10002-064', '10002-027', '10002-055', '10002-026', '10002-088', '10002-025', '10002-090'] AS HAZ_machines,
+
+ARRAY<STRING> ['10002-019','10002-020','10002-022','10002-025','10002-029','10002-055','10002-062','10002-063','10002-065','10002-071','10002-081','10002-084','10002-088','10002-090'] AS CAT3_machines,
+ARRAY<STRING> ['10002-001','10002-002','10002-005','10002-023','10002-024','10002-026','10002-027','10002-028','10002-030','10002-056','10002-057','10002-058','10002-059','10002-061','10002-064','10002-082'] AS CAT2_machines,
+),
+
+-- cast machine ids to ints, add site label
+machine_decoder AS (
+  
+  SELECT *,
+  LTRIM(REGEXP_EXTRACT(machines, r'^[a-zA-Z0-9_.+-]+\-([a-zA-Z0-9-.]+$)'), '0') AS hopper,
+  CASE WHEN (machines IN (SELECT WIB_machines FROM declares, UNNEST(WIB_machines) AS WIB_machines))
+    THEN 'WIB' ELSE 'HAZ' END AS site,
+    CASE WHEN (machines IN (SELECT CAT3_machines FROM declares, UNNEST(CAT3_machines) AS CAT3_machines))
+    THEN 'Cat 3' 
+     WHEN (machines IN (SELECT CAT2_machines FROM declares, UNNEST(CAT2_machines) AS CAT2_machines))
+    THEN 'Cat 2'
+    END AS category
+  FROM (
+    SELECT machines  
+    FROM declares,
+    UNNEST(ARRAY_CONCAT(declares.HAZ_machines, declares.WIB_machines)) AS machines
+  )
+
+),
+
+-- all dates
+-- changed this trying to clean up the output, but it didn't work like I expected
+date_range AS (
+  SELECT * 
+  FROM (SELECT DATE AS day
+        FROM UNNEST(GENERATE_DATE_ARRAY(DATE '2024-01-01', DATE '2024-12-30', INTERVAL 1 DAY)) AS date
+        )
+  CROSS JOIN (
+      SELECT site
+      FROM UNNEST(ARRAY<STRING>['WIB', 'HAZ']) AS site  -- move to declares
+  )
+)
+,
+
+-- velocity cells
+HAZ_flex_fill AS (
+ SELECT EXTRACT(DATE FROM filled_on) AS date,
+         site,
+         category,
+         planting_session_id 
+  FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
+ 
+  INNER JOIN (SELECT site, hopper, category FROM machine_decoder) AS decoder
+    ON flex.hopper = decoder.hopper
+
+  WHERE EXTRACT(DATE FROM filled_on) >= (SELECT start_date FROM declares)
+  AND flex.station = (SELECT station FROM declares)
+
+ ),
+
+finalized_ps as (
+    SELECT id
+    FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_planting_session`AS ps 
+    WHERE planting_year = (SELECT target_planting_year FROM declares)
+    and state = 'finalized')
+  
+SELECT *
+FROM finalized_ps
+inner JOIN HAZ_flex_fill 
+    ON HAZ_flex_fill.planting_session_id = finalized_ps.id
+WHERE site = 'HAZ'
+--ORDER BY planting_session_id, category
