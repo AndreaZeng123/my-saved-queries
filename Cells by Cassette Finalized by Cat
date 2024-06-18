@@ -83,13 +83,41 @@ plrow_new_type AS (
 ),
 
 HAZ_filled_created_plotrow AS (
-  SELECT HAZ_filled_join_created.*, plrow_new_type.type_new, plrow_new_type.planting_session_id
+  SELECT HAZ_filled_join_created.*, plrow_new_type.type_new
   FROM HAZ_filled_join_created
   JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_cell` cell 
   ON HAZ_filled_join_created.cassette_id = cell.cassette_id and HAZ_filled_join_created.cell_number = cell.cell_number
   JOIN plrow_new_type
   ON cell.plot_row_id = plrow_new_type.plot_row_id )
-
-  select *
+,
+add_new_type AS (
+  select *,
+  case when type_new in ('border','buffer') then type_new
+  else category 
+  end as cat_type
   from HAZ_filled_created_plotrow
   where site = 'HAZ'
+  order by planting_session_id, cassette_id, cell_number)
+
+,output_in_wide AS (
+  SELECT EXTRACT(Date from created_on) AS cassette_finalized_date, cat_type, COUNT(*) AS n_cells
+  FROM add_new_type
+  GROUP BY EXTRACT(Date from created_on),cat_type
+  ORDER BY cassette_finalized_date
+)
+,output_in_long AS (
+SELECT cassette_finalized_date,
+CASE cat_type WHEN 'buffer' THEN n_cells END AS buffer,
+CASE cat_type WHEN 'border' THEN n_cells END AS border,
+CASE cat_type WHEN 'Cat 2' THEN n_cells END AS Cat_2,
+CASE cat_type WHEN 'Cat 3' THEN n_cells END AS Cat_3
+FROM  output_in_wide)
+
+SELECT cassette_finalized_date,
+SUM(buffer) AS buffer,
+SUM(border) AS border,
+SUM(Cat_2) AS Cat_2,
+SUM(Cat_3) AS Cat_3
+FROM output_in_long
+GROUP BY cassette_finalized_date
+ORDER BY cassette_finalized_date
