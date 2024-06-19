@@ -72,21 +72,31 @@ HAZ_filled_join_created AS (
 ),
 
 
+RTE_date AS (
+  SELECT setId,MAX(EXTRACT(Date from audit_time_stamp)) AS RTE_date
+  FROM `bcs-breeding-datasets.velocity.set_audits`
+  where audit_status = 'Material Fulfillment: Ready to Execute'
+  GROUP BY setId
+),
+
 HAZ_filled_created_plotrow AS (
-  SELECT HAZ_filled_join_created.*, type
+  SELECT HAZ_filled_join_created.*, type, plrow.set_id,RTE_date
   FROM HAZ_filled_join_created
   JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_cell` cell 
   ON HAZ_filled_join_created.cassette_id = cell.cassette_id and HAZ_filled_join_created.cell_number = cell.cell_number
   JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_plot_row` plrow
-  ON cell.plot_row_id = plrow.id )
+  ON cell.plot_row_id = plrow.id 
+  LEFT JOIN RTE_date 
+  ON RTE_date.setId = plrow.set_id)
 
   select cassette_id,cell_number,
   case when type in ('border','buffer') then type
   else category 
   end as cat_type,
   planting_session_id,
-  EXTRACT(Date from created_on) AS cassette_finalized_date
+  EXTRACT(Date from created_on) AS cassette_finalized_date,
+  RTE_date
   
   from HAZ_filled_created_plotrow
   where site = 'HAZ'
-  order by planting_session_id, cassette_id, cell_number
+  order by cassette_id, cell_number
