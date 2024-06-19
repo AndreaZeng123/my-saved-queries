@@ -48,13 +48,23 @@ date_range AS (
   )
 ),
 
+
+fts_vel_invbid AS (
+SELECT  inv_bid,barcode, MAX(EXTRACT(Date from datetime_start))AS inventory_available_date
+FROM `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3`  s3
+left join `bcs-csw-core.velocity.inventory` inv
+on s3.inv_bid = inv.legacyBarcode
+GROUP BY 1,2
+),
+
 HAZ_filled_cells AS (
 SELECT
          planting_session_id,
          site,
          category,
          cassette_id, 
-         cell_number
+         cell_number,
+         inventory_bid
   FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
  
   INNER JOIN (SELECT site, hopper, category FROM machine_decoder) AS decoder
@@ -65,14 +75,16 @@ SELECT
 ),
 
 HAZ_filled_join_created AS (
-  SELECT HAZ_filled_cells.*,created_on
+  SELECT HAZ_filled_cells.*,inventory_available_date, created_on
   FROM HAZ_filled_cells
   LEFT JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_planting_session` ps
   ON ps.id = HAZ_filled_cells.planting_session_id
+  LEFT JOIN fts_vel_invbid AS inv 
+  ON inv.barcode = cast(HAZ_filled_cells.inventory_bid as int64)
 ),
 
 
-RTE_date AS (
+RTE_date_table AS (
   SELECT setId,MAX(EXTRACT(Date from audit_time_stamp)) AS RTE_date
   FROM `bcs-breeding-datasets.velocity.set_audits`
   where audit_status = 'Material Fulfillment: Ready to Execute'
@@ -86,17 +98,27 @@ HAZ_filled_created_plotrow AS (
   ON HAZ_filled_join_created.cassette_id = cell.cassette_id and HAZ_filled_join_created.cell_number = cell.cell_number
   JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_plot_row` plrow
   ON cell.plot_row_id = plrow.id 
-  LEFT JOIN RTE_date 
-  ON RTE_date.setId = plrow.set_id)
+  LEFT JOIN RTE_date_table 
+  ON RTE_date_table.setId = plrow.set_id)
 
-  select cassette_id,cell_number,
+-- , output as (
+  select distinct cassette_id,cell_number,
   case when type in ('border','buffer') then type
   else category 
   end as cat_type,
   planting_session_id,
+  inventory_available_date,
+  RTE_date,
   EXTRACT(Date from created_on) AS cassette_finalized_date,
-  RTE_date
+  
   
   from HAZ_filled_created_plotrow
   where site = 'HAZ'
   order by cassette_id, cell_number
+--   )
+
+--   select *
+--   from output
+--  where cassette_id = '002f9f20-aecc-480b-b5a6-01b922113555'
+ 
+--   order by 1,2
