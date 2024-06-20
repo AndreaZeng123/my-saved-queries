@@ -1,0 +1,153 @@
+-- set constants
+WITH declares AS (
+  SELECT 
+    DATE '2024-01-01' AS start_date,
+    2024 AS target_planting_year,
+    '10002' AS station, -- station where serial number is separated into hopper and station
+    ARRAY<STRING> ['Corn', 'Cotton', 'Wheat', 'Soybean', 'Soybeans', 'Sweet Corn'] AS crops,
+    ARRAY<STRING> ['10002-004', '10002-041', '10002-048', '10002-049', '10002-053', '10002-072', '10002-075', '10002-076', '10002-079', '10002-085'] AS WIB_machines, -- WIB machine
+    ARRAY<STRING> ['10002-081', '10002-001', '10002-005', '10002-028', '10002-019', '10002-020', '10002-071', '10002-084',
+                  '10002-029', '10002-058', '10002-062', '10002-030', '10002-059', '10002-057', '10002-063',
+                  '10002-061', '10002-056', '10002-065', '10002-082', '10002-002', '10002-023', '10002-022', '10002-024',
+                  '10002-064', '10002-027', '10002-055', '10002-026', '10002-088', '10002-025', '10002-090'] AS HAZ_machines,
+
+ARRAY<STRING> ['10002-019','10002-020','10002-022','10002-025','10002-029','10002-055','10002-062','10002-063','10002-065','10002-071','10002-081','10002-084','10002-088','10002-090'] AS CAT3_machines,
+ARRAY<STRING> ['10002-001','10002-002','10002-005','10002-023','10002-024','10002-026','10002-027','10002-028','10002-030','10002-056','10002-057','10002-058','10002-059','10002-061','10002-064','10002-082'] AS CAT2_machines,
+),
+
+-- cast machine ids to ints, add site label
+machine_decoder AS (
+  
+  SELECT *,
+  LTRIM(REGEXP_EXTRACT(machines, r'^[a-zA-Z0-9_.+-]+\-([a-zA-Z0-9-.]+$)'), '0') AS hopper,
+  CASE WHEN (machines IN (SELECT WIB_machines FROM declares, UNNEST(WIB_machines) AS WIB_machines))
+    THEN 'WIB' ELSE 'HAZ' END AS site,
+    CASE WHEN (machines IN (SELECT CAT3_machines FROM declares, UNNEST(CAT3_machines) AS CAT3_machines))
+    THEN 'Cat 3' 
+     WHEN (machines IN (SELECT CAT2_machines FROM declares, UNNEST(CAT2_machines) AS CAT2_machines))
+    THEN 'Cat 2'
+    END AS category
+  FROM (
+    SELECT machines  
+    FROM declares,
+    UNNEST(ARRAY_CONCAT(declares.HAZ_machines, declares.WIB_machines)) AS machines
+  )
+
+),
+
+-- all dates
+-- changed this trying to clean up the output, but it didn't work like I expected
+date_range AS (
+  SELECT * 
+  FROM (SELECT DATE AS day
+        FROM UNNEST(GENERATE_DATE_ARRAY(DATE '2024-01-01', DATE '2024-12-30', INTERVAL 1 DAY)) AS date
+        )
+  CROSS JOIN (
+      SELECT site
+      FROM UNNEST(ARRAY<STRING>['WIB', 'HAZ']) AS site  -- move to declares
+  )
+),
+
+first_join AS (
+SELECT  inv_bid,barcode, MAX(EXTRACT(Date from datetime_start))AS inventory_available_date
+FROM `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3`  s3
+left join `bcs-csw-core.velocity.inventory` inv
+on s3.inv_bid = inv.legacyBarcode
+GROUP BY 1,2
+),
+
+HAZ_filled_cells AS (
+SELECT
+         planting_session_id,
+         site,
+         category,
+         cassette_id, 
+         cell_number,
+         inventory_bid
+  FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
+ 
+  INNER JOIN (SELECT site, hopper, category FROM machine_decoder) AS decoder
+    ON flex.hopper = decoder.hopper
+
+  WHERE EXTRACT(DATE FROM filled_on) >= (SELECT start_date FROM declares)
+  AND flex.station = (SELECT station FROM declares)
+),
+
+HAZ_filled_join_created AS (
+  SELECT HAZ_filled_cells.*,inventory_available_date, created_on
+  FROM HAZ_filled_cells
+  LEFT JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_planting_session` ps
+  ON ps.id = HAZ_filled_cells.planting_session_id
+  LEFT JOIN first_join AS first_join_inv 
+  ON first_join_inv.barcode = cast(HAZ_filled_cells.inventory_bid as int64)
+),
+
+inv as (SELECT barcode, legacyBarcode
+FROM `bcs-breeding-datasets.velocity.inventory`),
+find_sender as (
+select inv.*, matexc.receiver_inv_barcode, matexc.sender_inv_barcode
+from inv 
+left join `bcs-csw-core.exadata.midas_material_exchange` matexc
+on matexc.receiver_inv_barcode = inv.legacyBarcode),
+
+combine_2_fts_barcode as (
+select barcode, 
+case when sender_inv_barcode is not null then sender_inv_barcode
+else legacyBarcode 
+end as fts_code
+from find_sender),
+
+second_join as (
+select inv_bid, barcode, max(extract(date from datetime_start)) as inventory_available_date_2
+from `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3` s3
+join combine_2_fts_barcode 
+on combine_2_fts_barcode.fts_code = s3.inv_bid
+group by 1,2),
+
+HAZ_filled_join_created_2 AS (
+  SELECT *,
+  CASE WHEN inventory_available_date is not null then inventory_available_date
+  else inventory_available_date_2
+  end as inventory_available_date_3
+  FROM HAZ_filled_join_created
+  JOIN second_join 
+  on second_join.barcode = cast(HAZ_filled_join_created.inventory_bid as int64)
+),
+
+RTE_date_table AS (
+  SELECT setId,MAX(EXTRACT(Date from audit_time_stamp)) AS RTE_date
+  FROM `bcs-breeding-datasets.velocity.set_audits`
+  where audit_status = 'Material Fulfillment: Ready to Execute'
+  GROUP BY setId
+),
+
+HAZ_filled_created_plotrow AS (
+  SELECT HAZ_filled_join_created_2.*, type, plrow.set_id,RTE_date
+  FROM HAZ_filled_join_created_2
+  JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_cell` cell 
+  ON HAZ_filled_join_created_2.cassette_id = cell.cassette_id and HAZ_filled_join_created_2.cell_number = cell.cell_number
+  JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_plot_row` plrow
+  ON cell.plot_row_id = plrow.id 
+  LEFT JOIN RTE_date_table 
+  ON RTE_date_table.setId = plrow.set_id)
+
+ , output as (
+  select distinct cassette_id,cell_number,
+  case when type in ('border','buffer') then type
+  else category 
+  end as cat_type,
+  planting_session_id,
+  inventory_available_date_3,
+  RTE_date,
+  EXTRACT(Date from created_on) AS cassette_finalized_date,
+  
+  
+  from HAZ_filled_created_plotrow
+  where site = 'HAZ'
+  order by cassette_id, cell_number   )
+
+  select *
+  from output
+ where cat_type = 'Cat 3'
+ and inventory_available_date_3 is null
+  order by 1,2
