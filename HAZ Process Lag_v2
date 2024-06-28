@@ -1,0 +1,179 @@
+-- set constants
+WITH declares AS (
+  SELECT 
+    DATE '2024-01-01' AS start_date,
+    2024 AS target_planting_year,
+    '10002' AS station, -- station where serial number is separated into hopper and station
+    ARRAY<STRING> ['Corn', 'Cotton', 'Wheat', 'Soybean', 'Soybeans', 'Sweet Corn'] AS crops,
+    ARRAY<STRING> ['10002-081', '10002-001', '10002-005', '10002-028', '10002-019', '10002-020', '10002-071', '10002-084',
+                  '10002-029', '10002-058', '10002-062', '10002-030', '10002-059', '10002-057', '10002-063',
+                  '10002-061', '10002-056', '10002-065', '10002-082', '10002-002', '10002-023', '10002-022', '10002-024',
+                  '10002-064', '10002-027', '10002-055', '10002-026', '10002-088', '10002-025', '10002-090'] AS HAZ_machines,
+
+ARRAY<STRING> ['10002-019','10002-020','10002-022','10002-025','10002-029','10002-055','10002-062','10002-063','10002-065','10002-071','10002-081','10002-084','10002-088','10002-090'] AS CAT3_machines,
+ARRAY<STRING> ['10002-001','10002-002','10002-005','10002-023','10002-024','10002-026','10002-027','10002-028','10002-030','10002-056','10002-057','10002-058','10002-059','10002-061','10002-064','10002-082'] AS CAT2_machines,
+),
+
+-- cast machine ids to ints, add site label
+machine_decoder AS (
+  
+  SELECT *,
+  LTRIM(REGEXP_EXTRACT(machines, r'^[a-zA-Z0-9_.+-]+\-([a-zA-Z0-9-.]+$)'), '0') AS hopper,
+  CASE WHEN (machines IN (SELECT HAZ_machines FROM declares, UNNEST(HAZ_machines) AS HAZ_machines))
+    THEN 'HAZ' END AS site,
+    CASE WHEN (machines IN (SELECT CAT3_machines FROM declares, UNNEST(CAT3_machines) AS CAT3_machines))
+    THEN 'Cat 3' 
+     WHEN (machines IN (SELECT CAT2_machines FROM declares, UNNEST(CAT2_machines) AS CAT2_machines))
+    THEN 'Cat 2'
+    END AS category
+  FROM (
+    SELECT machines  
+    FROM declares,
+    UNNEST(ARRAY_CONCAT(declares.HAZ_machines)) AS machines
+  )
+
+),
+
+-- all dates
+-- changed this trying to clean up the output, but it didn't work like I expected
+date_range AS (
+  SELECT * 
+  FROM (SELECT DATE AS day
+        FROM UNNEST(GENERATE_DATE_ARRAY(DATE '2024-01-01', DATE '2024-12-30', INTERVAL 1 DAY)) AS date
+        )
+  CROSS JOIN (
+      SELECT site
+      FROM UNNEST(ARRAY<STRING>[ 'HAZ']) AS site  -- move to declares
+  )
+),
+
+packet_verify_date as (
+  SELECT setId, packetVerificationDate
+FROM 
+`bcs-breeding-datasets.velocity.packaging_plan`
+order by setId
+
+),
+
+HAZ_filled_cells AS (
+SELECT
+        -- planting_session_id,
+         --site,
+         --category,
+         flex.cassette_id, 
+         flex.cell_number,
+         set_id,
+         flex.inventory_bid,
+         extract(datetime from filled_on) as flex_fill_date
+         
+  FROM `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` flex
+ 
+  INNER JOIN (SELECT site, hopper, category FROM machine_decoder) AS decoder
+    ON flex.hopper = decoder.hopper
+
+  LEFT JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_cell` cell
+    ON cell.cassette_id = flex.cassette_id AND cell.cell_number = flex.cell_number
+  LEFT JOIN `bcs-breeding-datasets.breeding_operations.influx_field_cassette_plot_row` plrow
+    ON cell.plot_row_id = plrow.id
+
+
+  WHERE EXTRACT(DATE FROM filled_on) >= (SELECT start_date FROM declares)
+  AND flex.station = (SELECT station FROM declares)
+),
+
+cells_filled_date AS (
+  SELECT set_id, MAX(flex_fill_date) AS flex_fill_finish_date
+  FROM HAZ_filled_cells
+  GROUP BY set_id
+),
+
+first_join AS (
+SELECT  
+inv_bid,
+barcode, 
+MIN(EXTRACT(datetime from datetime_start))AS process_start_date,
+MAX(EXTRACT(datetime from datetime_start))AS process_finish_date
+FROM `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3`  s3
+left join `bcs-csw-core.velocity.inventory` inv
+on s3.inv_bid = inv.legacyBarcode
+where EXTRACT(datetime FROM datetime_start) >= (SELECT start_date FROM declares)
+GROUP BY 1,2
+),
+
+cells_filled_1_join AS (
+  SELECT HAZ_filled_cells.*,
+  process_start_date,
+  process_finish_date
+  FROM HAZ_filled_cells
+  LEFT JOIN first_join AS first_join
+  ON first_join.barcode = cast(HAZ_filled_cells.inventory_bid as int64)
+),
+
+inv as (SELECT barcode, legacyBarcode
+FROM `bcs-breeding-datasets.velocity.inventory`),
+find_sender as (
+select inv.*, matexc.receiver_inv_barcode, matexc.sender_inv_barcode
+from inv 
+left join `bcs-csw-core.exadata.midas_material_exchange` matexc
+on matexc.receiver_inv_barcode = inv.legacyBarcode),
+
+combine_2_fts_barcode as (
+select barcode, 
+case when sender_inv_barcode is not null then sender_inv_barcode
+else legacyBarcode 
+end as fts_code
+from find_sender),
+
+second_join as (
+select inv_bid, barcode, 
+MIN(EXTRACT(datetime from datetime_start))AS process_start_date2,
+MAX(EXTRACT(datetime from datetime_start))AS process_finish_date2
+from `bcs-breeding-datasets.breeding_operations.mactracker_shellmatic_3` s3
+join combine_2_fts_barcode 
+on combine_2_fts_barcode.fts_code = s3.inv_bid
+where EXTRACT(datetime FROM datetime_start) >= (SELECT start_date FROM declares)
+group by 1,2)
+
+,cells_filled_2_join AS (
+SELECT cassette_id, 
+         cell_number,
+         set_id,
+        inventory_bid,
+         flex_fill_date,
+CASE WHEN process_start_date is not null then process_start_date
+  else process_start_date2
+  end as process_start_date,
+  CASE WHEN process_finish_date is not null then process_finish_date
+  else process_finish_date2
+  end as process_finish_date
+  FROM cells_filled_1_join
+  LEFT JOIN second_join 
+  ON second_join.barcode = cast(cells_filled_1_join.inventory_bid as int64)
+)
+,add_set_ack_date AS (
+SELECT cells_filled_2_join.*, packetVerificationDate AS set_acknowledged_date
+FROM cells_filled_2_join
+LEFT JOIN `bcs-breeding-datasets.velocity.packaging_plan` pp 
+ON cells_filled_2_join.set_id = pp.setId
+order by setId),
+output as (
+SELECT set_id,
+MAX(process_start_date) AS process_start_date,
+MAX(process_finish_date) AS process_finish_date,
+MAX(flex_fill_date) AS flex_fill_date,
+MAX(set_acknowledged_date) AS set_acknowledged_date
+FROM add_set_ack_date
+GROUP BY set_id
+ORDER BY process_start_date)
+
+,pipeline as (
+select distinct crops, market, crop_material_stage,output.*
+from output 
+left join `bcs-breeding-datasets.velocity.experiment_sets_entries` ese 
+on ese.setid = output.set_id
+join `bcs-breeding-datasets.velocity.capacity_request` cr
+on ese.capacity_request_id = cr.capacity_request_id
+order by set_id)
+
+select *
+from pipeline  
