@@ -1,0 +1,89 @@
+WITH
+  A AS (
+  SELECT
+    cassettebid,
+    SAFE_CAST(cellnumbers AS numeric) AS cellnumbers,
+    id AS cassette_id,
+    targetcount,
+    seedcount,
+    fieldlocation,
+    setname,
+    setid,
+    plantingsessionname,
+    entryid,
+    crop,
+    isBuffer,
+    isGuard
+  FROM
+    `bcs-breeding-datasets.breeding_operations.redwing_planted_plotrow` rw
+  JOIN
+    `bcs-breeding-datasets.breeding_operations.influx_field_cassette_cassette` cs
+  ON
+    rw.cassettebid = cs.barcode ),
+  B AS (
+  SELECT
+    a.*,
+    filled.packet_bid,
+    filled.quantity
+  FROM
+    a
+  JOIN
+    `bcs-breeding-datasets.breeding_operations.influx_field_cassette_as_filled_cell` filled
+  ON
+    a.cassette_id = filled.cassette_id
+    AND a.cellnumbers = filled.cell_number
+  WHERE
+    EXTRACT(year
+    FROM
+      filled_on) >=2024),
+  C AS (
+  SELECT
+    batch_packet_barcode,
+    machine_location,
+    batch_type,
+    batch_target,
+    batch_count,
+    batch_num_of_packets
+  FROM
+    `bcs-breeding-datasets.breeding_operations.mactracker_nsp`
+  UNION ALL
+  SELECT
+    batch_packet_barcode,
+    machine_location,
+    batch_type,
+    batch_target,
+    batch_count,
+    batch_num_of_packets
+  FROM
+    `bcs-breeding-datasets.breeding_operations.mactracker_ytp` )
+SELECT
+  cassette_id,
+  cellnumbers,
+  cassettebid,
+  packet_bid,
+  entryid,
+  batch_target AS packet_batch_target,
+  batch_count AS packet_batch_count,
+  quantity AS flexfill_quantity,
+  targetcount AS plant_target_count,
+  seedcount AS plant_seed_count,
+  fieldlocation,
+  setid,
+  setname,
+  plantingsessionname,
+  crop,
+  isBuffer,
+  isGuard,
+  machine_location,
+  batch_type,
+  batch_num_of_packets
+FROM
+  b
+JOIN
+  c
+ON
+  CAST(b.packet_bid AS STRING) = c.batch_packet_barcode
+WHERE
+  machine_location = 'HAZ'
+ORDER BY
+  entryid
