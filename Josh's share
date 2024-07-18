@@ -1,0 +1,52 @@
+SELECT
+DISTINCT
+pp.fulfillmentGroupid,
+  cr.crops,
+  cr.status,
+  cr.trial_type,
+  cr.organization,
+  cr.market,
+  cr.crop_material_stage,
+  cr.sub_market,
+  cr.planter_type,
+  cr.requester,
+  e.plot_row_length,
+  ts.set_name as setName,
+  ts.setId,
+  ts.entryId,
+  p.allocatedInventoryBarcode,
+  l.id as lotId,
+  i.materialId,
+  p.packetBarcode,
+  p.packetGroup,
+  p.sequenceNumber,
+  FORMAT_TIMESTAMP("%m-%d-%Y",p.filledDate) as velocityFilled,
+  p.filledQuantity as velocityQuantity,
+  p.filledUom as velocityUOM,
+  p.printedDate,
+  ytp.batch_count as ytp_batchCount,
+  ytp.machine_serial ytp_machineSerial,
+  ytp.batch_packet_barcode as ytp_barcode,
+  FORMAT_TIMESTAMP("%m-%d-%Y",ytp.datetime_child_scan) as ytp_ChildScan,
+  nsp.batch_count as nsp_batchCount,
+  nsp.machine_serial nsp_machineSerial,
+  nsp.batch_packet_barcode as nsp_barcode,
+FORMAT_TIMESTAMP("%m-%d-%Y",nsp.datetime_child_scan) as nsp_ChildScan
+  FROM `bcs-csw-core.velocity.packet` p,
+  UNNEST(p.entryids) as pe,
+    `bcs-breeding-datasets.velocity.experiment_sets_entries` ts
+    LEFT OUTER JOIN `bcs-breeding-datasets.breeding_operations.mactracker_ytp` ytp on CAST(p.packetBarcode as string) = ytp.batch_packet_barcode
+    LEFT OUTER JOIN `bcs-breeding-datasets.breeding_operations.mactracker_nsp` nsp on CAST(p.packetBarcode as string) = nsp.batch_packet_barcode,
+    `bcs-breeding-datasets.velocity.packaging_plan` pp,
+     `bcs-breeding-datasets.velocity.capacity_request` cr,
+     UNNEST(cr.environment) as e
+    LEFT OUTER JOIN `bcs-csw-core.velocity.inventory` i on p.allocatedInventoryBarcode = i.barcode
+    LEFT OUTER JOIN `bcs-csw-core.velocity.lot` l on i.lotid = l.id
+WHERE pe = ts.entryid
+AND ts.setId = pp.setId
+AND pp.fulfillmentGroupId = 'HAZELWOOD-SEED-CENTER'
+AND ts.capacity_request_id = cr.capacity_request_id
+AND cr.planting_year = 2024
+--AND cr.crops = 'Corn'
+AND ts.set_name LIKE ('%FTC_NCF102%')
+ORDER BY ts.set_name, p.packetBarcode ASC
