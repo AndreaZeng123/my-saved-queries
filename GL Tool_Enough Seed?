@@ -1,0 +1,37 @@
+with set_RTE AS (
+SELECT sa.setId, experiment_name, experiment_id,entryid,MAX(EXTRACT(Date from audit_time_stamp)) AS RTE_date
+FROM `bcs-breeding-datasets.velocity.set_audits` sa
+JOIN `bcs-breeding-datasets.velocity.experiment_sets_entries` ese 
+ON sa.setId = ese.setid
+JOIN `bcs-csw-core.velocity.packaging_plan` pp
+ON pp.setid = ese.setid
+  where audit_status = 'Material Fulfillment: Ready to Execute'
+  and extract(year from audit_time_stamp) = 2024
+  and fulfillmentgroupid like '%HAZELW%'
+  GROUP BY sa.setId,experiment_name, experiment_id,entryid),
+pkt AS (
+  SELECT entryId,entrymaterialid,materialid,allocatedInventoryBarcode,packagingPlanId,requestedQuantity
+  FROM `bcs-csw-core.velocity.packet` pkt,UNNEST(entryids) as entryid,
+  UNNEST(entrymaterialids) AS entrymaterialid
+),
+pkt_inv AS (
+  SELECT pkt.entryId,pkt.entrymaterialid,pkt.materialid, pkt.requestedQuantity,inv.quantity, inv.uom, inv.barcode
+  FROM pkt
+  JOIN  `bcs-csw-core.velocity.inventory` AS inv
+  ON pkt.allocatedInventoryBarcode = inv.barcode
+
+),
+
+combine_exp_info AS (
+  SELECT DISTINCT set_RTE.setId, experiment_name, experiment_id,RTE_date,pkt_inv.entryId,entrymaterialid,materialid, requestedQuantity,quantity, uom, barcode
+  FROM set_RTE 
+  JOIN pkt_inv
+  ON set_RTE.entryid = pkt_inv.entryid
+)
+
+
+SELECT experiment_name,experiment_id,RTE_date,materialid,barcode, SUM(requestedQuantity) AS requestedQuantity,
+MIN(quantity) AS inv_quantity
+FROM combine_exp_info
+GROUP BY 1,2,3,4,5
+order by RTE_date,experiment_id,materialid
