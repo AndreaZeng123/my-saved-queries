@@ -1,0 +1,29 @@
+WITH nsp AS (
+  SELECT machine_location, record_id,
+         DATE(datetime_child_scan, 'America/Chicago') as date
+  FROM `bcs-breeding-datasets.breeding_operations.mactracker_nsp`
+  WHERE REGEXP_CONTAINS(batch_packet_barcode, r'^P0|^\d')
+  AND EXTRACT(DATE FROM datetime_source_scan) >= '2023-07-01'
+  ),
+ 
+ytp AS (
+  SELECT machine_location, record_id,
+         DATE(datetime_child_scan, 'America/Chicago') as date
+  FROM `bcs-breeding-datasets.breeding_operations.mactracker_ytp`
+  WHERE REGEXP_CONTAINS(batch_packet_barcode, r'^P0|^\d') --excludes border. Is this what we want?
+  AND EXTRACT(DATE FROM datetime_source_scan) >= '2023-07-01'
+  ),
+ 
+all_data AS (
+  SELECT * FROM nsp
+  UNION ALL
+  SELECT * FROM ytp
+)
+ 
+SELECT machine_location, COUNT(record_id) as n_packets,
+    CASE WHEN (date >= '2024-01-01') THEN 'Q1/Q2'
+      ELSE 'Q3/Q4' END AS season
+  FROM all_data
+  WHERE machine_location IN ('HAZ', 'WIB', 'SOG', 'KIE', 'KUI', 'JDZ', 'TLA', 'RAG', 'SIA')
+  GROUP BY season, machine_location
+  ORDER BY season, machine_location
