@@ -1,19 +1,19 @@
 WITH
   A AS (
   SELECT
-    cassettebid,
-    SAFE_CAST(cellnumbers AS numeric) AS cellnumbers,
-    id AS cassette_id,
-    targetcount,
-    seedcount,
-    fieldlocation,
-    setname,
-    setid,
-    plantingsessionname,
-    entryid,
-    crop,
-    isBuffer,
-    isGuard
+    rw.cassettebid,
+    SAFE_CAST(rw.cellnumbers AS numeric) AS cellnumbers,
+    cs.id AS cassette_id,
+    rw.targetcount,
+    rw.seedcount,
+    rw.fieldlocation,
+    rw.setname,
+    rw.setid,
+    rw.plantingsessionname,
+    rw.entryid,
+    rw.crop,
+    rw.isBuffer,
+    rw.isGuard
   FROM
     `bcs-breeding-datasets.breeding_operations.redwing_planted_plotrow` rw
   JOIN
