@@ -8,6 +8,7 @@ WITH
     ese.entryid,
     cre.homesite_name,
     sg.site_name,
+    sg.field_name,
     cr.crops,
     MAX(EXTRACT(Date
       FROM
@@ -36,6 +37,7 @@ WITH
     ese.entryid,
     cre.homesite_name,
     sg.site_name,
+    sg.field_name,
     cr.crops),
   
   pkt_unnest AS (
@@ -60,6 +62,7 @@ WITH
       RTE_date,
       homesite_name,
       site_name,
+      field_name,
       crops,
       COUNT(entry_id) AS total_entries,
       SUM(CASE WHEN filledDate IS NOT NULL THEN 1 ELSE 0 END) AS filled_entries,
@@ -75,7 +78,7 @@ WITH
     FROM
       entry_filled
     
-    GROUP BY 1,2,3,4,5,6,7,8
+    GROUP BY 1,2,3,4,5,6,7,8,9
     ORDER BY 
       RTE_date DESC,
       experiment_id,
