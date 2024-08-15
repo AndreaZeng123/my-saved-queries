@@ -2,10 +2,11 @@ WITH
   set_RTE AS (
   SELECT
     sa.setId,
+    ese.capacity_request_id AS VCR,
     ese.experiment_name,
     ese.experiment_id,
     ese.entryid,
-    sg.homesite_name,
+    cre.homesite_name,
     sg.site_name,
     cr.crops,
     MAX(EXTRACT(Date
@@ -19,83 +20,91 @@ WITH
   JOIN UNNEST(ese.material_fulfillment_groups) AS material_fulfillment_groups
   LEFT JOIN `bcs-breeding-datasets.velocity.capacity_request` cr
   ON cr.capacity_request_id = ese.capacity_request_id
+  LEFT JOIN UNNEST(cr.environment) cre
   LEFT JOIN `bcs-breeding-datasets.velocity.sets_geography` sg
   ON sg.entryid = ese.entryid
   WHERE
-    --sa.audit_status = 'Mapping: Ready to Execute'
-    sa.audit_status = 'Material Fulfillment: Ready to Execute'
+    1=1
+    --AND sa.audit_status = 'Material Fulfillment: Ready to Execute'
     AND EXTRACT(DATE FROM sa.audit_time_stamp) >= '2024-07-31'
     AND material_fulfillment_groups = 'HAZELWOOD-SEED-CENTER'
   GROUP BY
     sa.setId,
-    experiment_name,
-    experiment_id,
-    entryid,
-    homesite_name,
-    site_name,
-    crops),
+    ese.capacity_request_id,
+    ese.experiment_name,
+    ese.experiment_id,
+    ese.entryid,
+    cre.homesite_name,
+    sg.site_name,
+    cr.crops),
 
-  pkt AS (
-  SELECT
-    entryId,
-    entryMaterialId,
-    materialId,
-    allocatedInventoryBarcode,
-    packagingPlanId,
-    requestedQuantity
-  FROM
-    `bcs-csw-core.velocity.packet` pkt,
-    UNNEST(entryIds) AS entryId,
-    UNNEST(entryMaterialIds) AS entryMaterialId ),
+  reqQuan AS (
+  select 
+  entryid,
+  si.value AS requested_quantity
+  from `bcs-breeding-datasets.velocity.experiment_sets_entries` ese
+  JOIN UNNEST(ese.set_instructions) as si
+  where 
+  1=1
+  and si.question_uom = 'SEEDS_PER_PACK'
+  ),
 
-  pkt_inv AS (
+  entry_barcode AS (
+  SELECT es.entryid,CAST(mt.materialid AS numeric) AS barcode
+  FROM `bcs-csw-core.velocity.sets`
+  JOIN UNNEST(entries) es
+  JOIN unnest(es.materials) mt
+  where mt.producttype = 'inventory'
+  ),
+
+  entry_barcode_inv AS (
   SELECT
-    pkt.entryId,
-    pkt.entrymaterialid,
-    pkt.materialid,
-    pkt.requestedQuantity,
+    eb.entryid,
+    eb.barcode,
     inv.quantity,
-    inv.uom,
-    inv.barcode
+    inv.uom    
   FROM
-    pkt
-  LEFT JOIN
-    `bcs-csw-core.velocity.inventory` AS inv
-  ON
-    pkt.allocatedInventoryBarcode = inv.barcode ),
-    
-  combine_exp_info AS (
+    entry_barcode eb
+  JOIN
+  `bcs-csw-core.velocity.inventory` inv
+  ON 
+  eb.barcode = inv.barcode
+  ),
+
+
+  combined AS (
   SELECT
     DISTINCT set_RTE.setId,
+    set_RTE.VCR,
     set_RTE.experiment_name,
     set_RTE.experiment_id,
     set_RTE.RTE_date,
-    pkt_inv.entryId,
-    pkt_inv.entryMaterialId,
-    pkt_inv.materialId,
-    pkt_inv.requestedQuantity,
-    pkt_inv.quantity,
-    pkt_inv.uom,
-    pkt_inv.barcode
+    set_RTE.entryId,    
+    reqQuan.requested_quantity,
+    entry_barcode_inv.barcode,
+    entry_barcode_inv.quantity,
+    entry_barcode_inv.uom
   FROM
     set_RTE
+  LEFT JOIN 
+    reqQuan
+  ON set_RTE.entryid = reqQuan.entryid
   LEFT JOIN
-    pkt_inv
+    entry_barcode_inv
   ON
-    set_RTE.entryid = pkt_inv.entryid )
+    set_RTE.entryid = entry_barcode_inv.entryid)
 
 
 SELECT
-  materialid AS material_id,
-  CAST(barcode AS numeric) AS barcode,
-  CAST(SUM(requestedQuantity) AS numeric) AS requested_quantity,
-  CAST(MIN(quantity) AS numeric) AS inventory_quantity,
-  (CAST(MIN(quantity) AS numeric) - CAST(SUM(requestedQuantity) AS numeric)) AS seed_difference
+  CAST(barcode AS numeric) AS inventory_vel_barcode,
+  SUM(CAST(requested_quantity AS numeric)) AS requested_quantity,
+  MIN(CAST(quantity AS numeric)) AS inventory_quantity,
+  (MIN(CAST(quantity AS numeric)) - SUM(CAST(requested_quantity AS numeric))) AS seed_difference
 FROM
-  combine_exp_info
+  combined
 GROUP BY
-  1,
-  2
+  1
 ORDER BY
-  seed_difference,material_id
+  seed_difference,barcode
+
 
